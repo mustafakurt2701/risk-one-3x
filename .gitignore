@@ -1,0 +1,6 @@
+.env.local
+.next
+.next.bak-*
+.data
+node_modules
+asdsa
