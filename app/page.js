@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 async function request(url, options) {
   const response = await fetch(url, options);
@@ -42,6 +42,7 @@ export default function Page() {
   const [testSending, setTestSending] = useState(false);
   const [actionText, setActionText] = useState("");
   const [error, setError] = useState("");
+  const hasEnsuredRunningRef = useRef(false);
 
   async function refresh() {
     try {
@@ -104,6 +105,10 @@ export default function Page() {
   }
 
   useEffect(() => {
+    if (hasEnsuredRunningRef.current) {
+      return;
+    }
+    hasEnsuredRunningRef.current = true;
     ensureRunning();
     const timer = setInterval(refresh, 5000);
     return () => clearInterval(timer);
