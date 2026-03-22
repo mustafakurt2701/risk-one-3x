@@ -36,40 +36,10 @@ function SignalRow({ signal }) {
   );
 }
 
-function PositionRow({ position }) {
-  const statusLabel = position.status === "closed" ? position.closeReason || "Kapandi" : "Acik";
-  const statusClass =
-    position.closeReason === "RUG"
-      ? "status-rug"
-      : position.closeReason === "SL"
-        ? "status-sl"
-        : position.closeReason === "TP 2x"
-          ? "status-tp"
-          : position.closeReason === "EARLY EXIT"
-            ? "status-sl"
-          : "status-open";
-  return (
-    <div className="signal-row">
-      <div>
-        <strong>{position.name} ({position.symbol})</strong>
-        <p>Risk ${position.riskUsd.toFixed(2)} · Pozisyon ${position.allocationUsd.toFixed(2)}</p>
-        {position.status === "open" && position.tpCandidateTicks > 0 ? (
-          <p>TP teyit: {position.tpCandidateTicks}/3</p>
-        ) : null}
-        <code>{position.contractAddress}</code>
-      </div>
-      <div>
-        <span className={statusClass}>{statusLabel} · {position.pnlPct.toFixed(2)}%</span>
-        <p>${position.valueUsd.toFixed(2)}</p>
-      </div>
-    </div>
-  );
-}
-
 export default function Page() {
   const [scan, setScan] = useState(null);
   const [state, setState] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [testSending, setTestSending] = useState(false);
   const [actionText, setActionText] = useState("");
   const [error, setError] = useState("");
 
@@ -87,43 +57,54 @@ export default function Page() {
     }
   }
 
-  async function start() {
-    setLoading(true);
-    setActionText("Motor baslatiliyor...");
+  async function ensureRunning() {
     setError("");
     try {
+      const currentState = await request("/api/paper-trader/status");
+      setState(currentState);
+
+      if (currentState.running || currentState.starting) {
+        setActionText("Motor otomatik olarak calisiyor.");
+        return;
+      }
+
+      setActionText("Motor otomatik baslatiliyor...");
       await request("/api/paper-trader/start", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ initialBalanceSol: 1, solUsd: 130, intervalSeconds: 10 })
+        body: JSON.stringify({ intervalSeconds: 10 })
       });
       await refresh();
-      setActionText("Motor aktif.");
+      setActionText("Motor otomatik olarak calisiyor.");
     } catch (err) {
       setError(err.message);
       setActionText("");
-    } finally {
-      setLoading(false);
     }
   }
 
-  async function stop() {
-    setLoading(true);
-    setActionText("Motor durduruluyor...");
+  async function sendTestSignals() {
+    setTestSending(true);
+    setError("");
+    setActionText("Test sinyalleri Telegram'a gonderiliyor...");
+
     try {
-      await request("/api/paper-trader/stop", { method: "POST" });
+      const result = await request("/api/telegram/test", { method: "POST" });
       await refresh();
-      setActionText("Motor durduruldu.");
+      setActionText(
+        result.sentCount > 0
+          ? `${result.sentCount} test sinyali Telegram'a gonderildi.`
+          : "Gonderilecek test sinyali bulunamadi."
+      );
     } catch (err) {
       setError(err.message);
       setActionText("");
     } finally {
-      setLoading(false);
+      setTestSending(false);
     }
   }
 
   useEffect(() => {
-    refresh();
+    ensureRunning();
     const timer = setInterval(refresh, 5000);
     return () => clearInterval(timer);
   }, []);
@@ -132,18 +113,17 @@ export default function Page() {
     <main className="page-shell">
       <section className="hero">
         <div>
-          <p className="eyebrow">Risk Controlled Launcher</p>
-          <h1>Yeni Coinlere %10 Risk, TP 2x</h1>
+          <p className="eyebrow">Telegram Signal Bot</p>
+          <h1>Yeni Coin Sinyallerini Telegram&apos;a Gonder</h1>
           <p className="hero-copy">
-            Bu panel son 6-24 saatte cikan Solana coin&apos;lerini tarar. Her islemde toplam portfoyun en fazla %10&apos;u riske edilir, stop -50%, hedef 2x ve pozisyon boyutu sermayenin %20&apos;sidir.
+            Bu panel Dexscreener uzerinden yeni Solana coin&apos;lerini tarar, uygun `NOW` sinyallerini bulur ve dogrudan Telegram botuna iletir.
           </p>
-        </div>
-        <div className="hero-actions">
-          <button onClick={start} disabled={loading || state?.running || state?.starting}>
-            {loading || state?.starting ? "Baslatiliyor..." : state?.running ? "Motor Aktif" : "Motoru Başlat"}
+          <p className="hero-copy">
+            Tarama otomatik olarak surekli calisir; manuel baslatma veya durdurma yoktur.
+          </p>
+          <button onClick={sendTestSignals} disabled={testSending || !state?.telegramEnabled}>
+            {testSending ? "Gonderiliyor..." : "Test Telegram Gonder"}
           </button>
-          <button onClick={stop} disabled={loading} className="ghost">Durdur</button>
-          <button onClick={refresh} disabled={loading} className="ghost">Yenile</button>
         </div>
       </section>
 
@@ -152,11 +132,9 @@ export default function Page() {
 
       <section className="stats-grid">
         <StatCard label="Taranan Pair" value={scan ? scan.rawPairCount : "-"} />
-        <StatCard label="Trade Adayı" value={scan ? scan.signals.length : "-"} />
-        <StatCard label="Toplam Bakiye" value={state ? `${state.balanceSol.toFixed(4)} SOL` : "-"} />
-        <StatCard label="Açık Pozisyon" value={state ? state.openCount : "-"} />
-        <StatCard label="Toplam Pozisyon" value={state ? state.allPositions.length : "-"} />
-        <StatCard label="Risk / Trade" value={state ? `%${state.riskPerTradePct}` : "%10"} />
+        <StatCard label="Bulunan Sinyal" value={scan ? scan.signals.length : "-"} />
+        <StatCard label="Bildirim Gonderilen" value={state ? state.notifiedSignalCount : "-"} />
+        <StatCard label="Telegram" value={state ? (state.telegramEnabled ? "Aktif" : "Kapali") : "-"} />
         <StatCard label="Discovery" value={scan ? scan.discoverySource : "-"} />
       </section>
 
@@ -178,35 +156,25 @@ export default function Page() {
 
         <div className="panel">
           <div className="panel-head">
-            <h2>Açık Pozisyonlar</h2>
+            <h2>Bot Durumu</h2>
             <span>{state?.starting ? "Başlatılıyor" : state?.running ? "Çalışıyor" : "Kapalı"}</span>
           </div>
           <div className="list">
-            {state?.openPositions?.length ? state.openPositions.map((position) => (
-              <PositionRow key={position.pairAddress} position={position} />
-            )) : <div className="empty">Pozisyon yok.</div>}
+            <div className="log-row">
+              <span>{state?.telegramEnabled ? "Bot Hazir" : "Bot Kapali"}</span>
+              <p>
+                {state?.telegramEnabled
+                  ? "Uygun NOW sinyalleri Telegram mesajı olarak gonderilir."
+                  : "TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID tanimli degil."}
+              </p>
+            </div>
           </div>
         </div>
       </section>
 
       <section className="panel">
         <div className="panel-head">
-          <h2>Tüm Pozisyonlar</h2>
-          <span>{state ? `${state.allPositions.length} adet` : "-"}</span>
-        </div>
-        <div className="list">
-          {state?.allPositions?.length ? state.allPositions.map((position) => (
-            <PositionRow
-              key={`${position.pairAddress}-${position.closedAt || "open"}`}
-              position={position}
-            />
-          )) : <div className="empty">Henüz pozisyon yok.</div>}
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-head">
-          <h2>İşlem Günlüğü</h2>
+          <h2>Bot Gunlugu</h2>
           <span>{state?.lastUpdatedAt ? new Date(state.lastUpdatedAt).toLocaleTimeString("tr-TR") : "-"}</span>
         </div>
         <div className="list">
